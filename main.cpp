@@ -18,7 +18,7 @@ int doctorCount = 0;
 int patientCount = 0;
 
 pthread_t* patients;
-pthread_t reception;
+//pthread_t reception;
 pthread_t* nurses;
 pthread_t* doctors;
 
@@ -37,6 +37,8 @@ queue<int>*  patientsAwaitingDoctor;
 void *patient(void *patientID)
 {
     //patientsAwaitingRegistration.push(patientID);
+    int pID = *(int *) &patientID;
+    printf("print from patient %i\n", pID);
     pthread_exit(NULL);
 }
 
@@ -45,7 +47,33 @@ void *receptionist(void *receptionistID)
     while(true)
     {
         //int patientID = patientsAwaitingRegistration.pop();
+        printf("print from receptionist\n");
+        break;
     }
+
+    pthread_exit(NULL);
+}
+
+void *nurse(void *nurseID)
+{
+    //while(true)
+    //{
+        int nID = *(int *) &nurseID;
+        printf("print from nurse %i\n", nID);
+        //break;
+    //}
+
+    pthread_exit(NULL);
+}
+
+void *doctor(void *doctorID)
+{
+    //while(true)
+    //{
+    int dID = *(int *) &doctorID;
+    printf("print from doctor %i\n", dID);
+        //break;
+    //}
 
     pthread_exit(NULL);
 }
@@ -89,20 +117,49 @@ int main(int argc, char *argv[])
         exit(-1);
     }
 
-    pthread_t patientThreads[patientCount];
-    pthread_t doctorThreads[doctorCount];
-    pthread_t nurseThreads[doctorCount];
-    int threadSuccess;
+    patients = new pthread_t[patientCount];
+    nurses = new pthread_t[doctorCount];
+    doctors = new pthread_t[doctorCount];
+    int threadError;
 
     for(int i = 0; i < patientCount; i++)
     {
         // Create patient threads
+        threadError = pthread_create(&patients[i], NULL, patient, (void *) i);
+
+        if(threadError)
+        {
+            cout << "Error: Unable to create patient thread with id " + to_string(i) + ".";
+            exit(-1);
+        }
     }
 
     for(int i = 0; i < doctorCount; i++)
     {
-        // Create doctor threads
+        // Create doctor and nurse threads
+        threadError = pthread_create(&nurses[i], NULL, nurse, (void *) i);
+
+        if(threadError)
+        {
+            cout << "Error: Unable to create nurse thread with id " + to_string(i) + ".";
+            exit(-1);
+        }
+
+        threadError = pthread_create(&doctors[i], NULL, doctor, (void *) i);
+
+        if(threadError)
+        {
+            cout << "Error: Unable to create doctor thread with id " + to_string(i) + ".";
+            exit(-1);
+        }
     }
+
+    //printf("doctor count: %i\n", doctorCount);
+   // for(int i = 0; i < doctorCount; i++)
+    //{
+    //    printf("doctor threads: %i\n", doctors[i]);
+    //}
+    
     
     return 0;
 }
