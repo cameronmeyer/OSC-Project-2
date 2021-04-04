@@ -1,5 +1,5 @@
 // Author: Cameron Meyer (cdm180003)
-// Project 1
+// Project 2
 // CS 4348.001
 
 
@@ -17,6 +17,7 @@ using namespace std;
 int doctorCount = 0;
 int patientCount = 0;
 int exitedPatients = 0;
+int* desiredDoctors;
 int* patientsInAppointment;
 
 pthread_t* patients;
@@ -43,6 +44,7 @@ void *patient(void *patientID)
 {
     int pID = *(int *) &patientID;
     int doctorID = rand() % doctorCount;
+    desiredDoctors[pID] = doctorID;
 
     // Enter room and signal that you'd like to speak with the receptionist
     printf("Patient %i enters waiting room, waits for receptionist\n", pID);
@@ -53,10 +55,6 @@ void *patient(void *patientID)
     sem_wait(&registerPatient[pID]);
     printf("Patient %i leaves receptionist and sits in waiting room\n", pID);
     sem_post(&receptionDeskDeparture[pID]);
-
-    // Signal a nurse that you're ready to see your doctor
-    patientsAwaitingDoctor[doctorID].push(pID);
-    sem_post(&awaitNurse[doctorID]);
 
     // Wait to be taken to the doctor's office
     sem_wait(&waitingRoomDeparture[doctorID]);
@@ -88,12 +86,17 @@ void *receptionist(void *receptionistID)
         // When a patient needs registration, retreive them from the queue
         sem_wait(&awaitReceptionist);
         int patientID = patientsAwaitingRegistration.front();
+        int doctorID = desiredDoctors[patientID];
         patientsAwaitingRegistration.pop();
 
         // Signal the patient to leave the receptionist desk, then wait for them to walk away
         printf("Receptionist registers patient %i\n", patientID);
         sem_post(&registerPatient[patientID]);
         sem_wait(&receptionDeskDeparture[patientID]);
+
+        // Signal the appropriate nurse that their patient is ready for their appointment
+        patientsAwaitingDoctor[doctorID].push(patientID);
+        sem_post(&awaitNurse[doctorID]);
     }
 
     pthread_exit(NULL);
@@ -166,93 +169,64 @@ int main(int argc, char *argv[])
         }
         catch(...)
         {
-            string errorMessage = "Error: Arguments could not be converted to valid integers.";
-            throw new invalid_argument(errorMessage);
+            printf("Error: Arguments could not be converted to valid integers.\n");
             exit(-1);
         }
     }
     else
     {
-        string errorMessage = "Error: Invalid argument list. Expected 2 arguments, but found " + to_string(argc-1) + ".";
-        throw new invalid_argument(errorMessage);
+        printf("Error: Invalid argument list. Expected 2 arguments, but found %i.\n", (argc-1));
         exit(-1);
     }
 
     // Check that the doctor count is valid
     if(doctorCount < 1 || doctorCount > 3)
     {
-        string errorMessage = "Error: Invalid number of doctors. Expected between 1-3 doctors, but found " + to_string(doctorCount) + ".";
-        throw new invalid_argument(errorMessage);
+        printf("Error: Invalid number of doctors. Expected between 1-3 doctors, but found %i.\n", doctorCount);
         exit(-1);
     }
 
     // Check that the patient count is valid
     if(patientCount < 1 || patientCount > 30)
     {
-        string errorMessage = "Error: Invalid number of patients. Expected between 1-30 patients, but found " + to_string(patientCount) + ".";
-        throw new invalid_argument(errorMessage);
+        printf("Error: Invalid number of patients. Expected between 1-30 patients, but found %i.\n", patientCount);
         exit(-1);
     }
 
     // Set up data structures for threads
     patientsAwaitingRegistration = queue<int>();
     patientsAwaitingDoctor = new queue<int>[doctorCount];
+    desiredDoctors = new int[patientCount];
     patientsInAppointment = new int[doctorCount];
 
     // Initialize all semaphores
     sem_init(&awaitReceptionist, 1, 0);
 
+    // Semaphores indexed by patient
     registerPatient = new sem_t[patientCount];
-    for(int i = 0; i < patientCount; i++)
-    {
-        sem_init(&registerPatient[i], 1, 0);
-    }
-
     receptionDeskDeparture = new sem_t[patientCount];
     for(int i = 0; i < patientCount; i++)
     {
+        sem_init(&registerPatient[i], 1, 0);
         sem_init(&receptionDeskDeparture[i], 1, 0);
     }
 
+    // Semaphores indexed by doctor
     awaitNurse = new sem_t[doctorCount];
-    for(int i = 0; i < doctorCount; i++)
-    {
-        sem_init(&awaitNurse[i], 1, 0);
-    }
-
     waitingRoomDeparture = new sem_t[doctorCount];
-    for(int i = 0; i < doctorCount; i++)
-    {
-        sem_init(&waitingRoomDeparture[i], 1, 0);
-    }
-
     doctorOfficeArrival = new sem_t[doctorCount];
-    for(int i = 0; i < doctorCount; i++)
-    {
-        sem_init(&doctorOfficeArrival[i], 1, 0);
-    }
-
     doctorBeginAppointment = new sem_t[doctorCount];
-    for(int i = 0; i < doctorCount; i++)
-    {
-        sem_init(&doctorBeginAppointment[i], 1, 0);
-    }
-
     listenSymptoms = new sem_t[doctorCount];
-    for(int i = 0; i < doctorCount; i++)
-    {
-        sem_init(&listenSymptoms[i], 1, 0);
-    }
-
     listenAdvice = new sem_t[doctorCount];
-    for(int i = 0; i < doctorCount; i++)
-    {
-        sem_init(&listenAdvice[i], 1, 0);
-    }
-
     doctorEndAppointment = new sem_t[doctorCount];
     for(int i = 0; i < doctorCount; i++)
     {
+        sem_init(&awaitNurse[i], 1, 0);
+        sem_init(&waitingRoomDeparture[i], 1, 0);
+        sem_init(&doctorOfficeArrival[i], 1, 0);
+        sem_init(&doctorBeginAppointment[i], 1, 0);
+        sem_init(&listenSymptoms[i], 1, 0);
+        sem_init(&listenAdvice[i], 1, 0);
         sem_init(&doctorEndAppointment[i], 1, 0);
     }
     
@@ -277,7 +251,7 @@ int main(int argc, char *argv[])
 
         if(threadError)
         {
-            cout << "Error: Unable to create patient thread with id " + to_string(i) + ".";
+            printf("Error: Unable to create patient thread with id %i.\n", i);
             exit(-1);
         }
     }
@@ -287,7 +261,7 @@ int main(int argc, char *argv[])
 
     if(threadError)
     {
-        cout << "Error: Unable to create receptionist thread.";
+        printf("Error: Unable to create receptionist thread.\n");
         exit(-1);
     }
 
@@ -298,7 +272,7 @@ int main(int argc, char *argv[])
 
         if(threadError)
         {
-            cout << "Error: Unable to create nurse thread with id " + to_string(i) + ".";
+            printf("Error: Unable to create nurse thread with id %i.\n", i);
             exit(-1);
         }
 
@@ -306,7 +280,7 @@ int main(int argc, char *argv[])
 
         if(threadError)
         {
-            cout << "Error: Unable to create doctor thread with id " + to_string(i) + ".";
+            printf("Error: Unable to create doctor thread with id %i.\n", i);
             exit(-1);
         }
     }
