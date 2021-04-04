@@ -5,11 +5,11 @@ CS 4348.001
 
 
 -- COMMANDS TO COMPILE AND RUN THE PROGRAM --
-g++ main.cpp -w -std=c++11 -lpthread && ./a.out <number of doctors> <number of patients>
+g++ project2.cpp -w -std=c++11 -lpthread && ./a.out <number of doctors> <number of patients>
 
 
 -- LIST OF FILES --
-main.cpp
+project2.cpp
 	Contains code to simulate people in a clinic via threads. 
 
 README.md
