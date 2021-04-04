@@ -34,6 +34,7 @@ sem_t* doctorOfficeArrival;
 sem_t* doctorBeginAppointment;
 sem_t* listenSymptoms;
 sem_t* listenAdvice;
+sem_t* patientDeparture;
 sem_t* doctorEndAppointment;
 sem_t adjustExitedPatients;
 
@@ -75,6 +76,7 @@ void *patient(void *patientID)
     printf("Patient %i leaves\n", pID);
     if(++exitedPatients == patientCount){ exit(0); }
     sem_post(&adjustExitedPatients);
+    sem_post(&patientDeparture[doctorID]);
 
     pthread_exit(NULL);
 }
@@ -149,6 +151,7 @@ void *doctor(void *doctorID)
         sem_wait(&listenAdvice[dID]);
 
         // When the patient leaves, signal the nurse that the appointment is over and a new patient may be seen
+        sem_wait(&patientDeparture[dID]);
         sem_post(&doctorEndAppointment[dID]);
     }
 
@@ -218,6 +221,7 @@ int main(int argc, char *argv[])
     doctorBeginAppointment = new sem_t[doctorCount];
     listenSymptoms = new sem_t[doctorCount];
     listenAdvice = new sem_t[doctorCount];
+    patientDeparture = new sem_t[doctorCount];
     doctorEndAppointment = new sem_t[doctorCount];
     for(int i = 0; i < doctorCount; i++)
     {
@@ -227,6 +231,7 @@ int main(int argc, char *argv[])
         sem_init(&doctorBeginAppointment[i], 1, 0);
         sem_init(&listenSymptoms[i], 1, 0);
         sem_init(&listenAdvice[i], 1, 0);
+        sem_init(&patientDeparture[i], 1, 0);
         sem_init(&doctorEndAppointment[i], 1, 0);
     }
     
