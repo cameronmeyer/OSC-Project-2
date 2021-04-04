@@ -6,11 +6,11 @@
 #include <pthread.h>
 #include <semaphore.h>
 #include <string>
+#include <queue>
 #include <cstdlib>
 #include <iostream>
 #include <stdexcept>
 #include <exception>
-#include <queue>
 
 using namespace std;
 
@@ -37,24 +37,24 @@ sem_t* doctorEndAppointment;
 sem_t adjustExitedPatients;
 
 queue<int> patientsAwaitingRegistration;
-queue<int>*  patientsAwaitingDoctor;
+queue<int>* patientsAwaitingDoctor;
 
 void *patient(void *patientID)
 {
     int pID = *(int *) &patientID;
     int doctorID = rand() % doctorCount;
 
-    // Enter room and wait for receptionist
+    // Enter room and signal that you'd like to speak with the receptionist
     printf("Patient %i enters waiting room, waits for receptionist\n", pID);
     patientsAwaitingRegistration.push(pID);
     sem_post(&awaitReceptionist);
 
-    // Wait for receptionist to finish, then leave the receptionist desk
+    // Wait for receptionist to complete your registration, then leave the receptionist desk
     sem_wait(&registerPatient[pID]);
     printf("Patient %i leaves receptionist and sits in waiting room\n", pID);
     sem_post(&receptionDeskDeparture[pID]);
 
-    // Wait to see your doctor
+    // Signal a nurse that you're ready to see your doctor
     patientsAwaitingDoctor[doctorID].push(pID);
     sem_post(&awaitNurse[doctorID]);
 
@@ -90,7 +90,7 @@ void *receptionist(void *receptionistID)
         int patientID = patientsAwaitingRegistration.front();
         patientsAwaitingRegistration.pop();
 
-        // Signal the patient to leave the receptionist desk
+        // Signal the patient to leave the receptionist desk, then wait for them to walk away
         printf("Receptionist registers patient %i\n", patientID);
         sem_post(&registerPatient[patientID]);
         sem_wait(&receptionDeskDeparture[patientID]);
@@ -105,18 +105,19 @@ void *nurse(void *nurseID)
     
     while(true)
     {
-        // Wait for a patient to want to see your doctor
+        // Wait for a patient to want to see your doctor and retreive them from the queue
         sem_wait(&awaitNurse[nID]);
         int patientID = patientsAwaitingDoctor[nID].front();
         patientsAwaitingDoctor[nID].pop();
 
         // Take patient to doctor's office
-        printf("Nurse %i takes patient %i to doctors office\n", nID, patientID);
+        printf("Nurse %i takes patient %i to doctor's office\n", nID, patientID);
         sem_post(&waitingRoomDeparture[nID]);
 
+        // Wait for patient to recognize they are now inside the doctor's office
         sem_wait(&doctorOfficeArrival[nID]);
 
-        // Signal doctor that a patient is ready to be seen
+        // Signal doctor that their patient is ready to be seen
         patientsInAppointment[nID] = patientID;
         sem_post(&doctorBeginAppointment[nID]);
 
@@ -137,9 +138,11 @@ void *doctor(void *doctorID)
         sem_wait(&doctorBeginAppointment[dID]);
         int patientID = patientsInAppointment[dID];
 
+        // Signal to the patient that they may now list off their symptoms
         printf("Doctor %i listens to symptoms from patient %i\n", dID, patientID);
         sem_post(&listenSymptoms[dID]);
 
+        // Wait for the patient to listen to all your advice
         sem_wait(&listenAdvice[dID]);
 
         // When the patient leaves, signal the nurse that the appointment is over and a new patient may be seen
@@ -151,6 +154,7 @@ void *doctor(void *doctorID)
 
 int main(int argc, char *argv[])
 {
+    // Check for correct number of arguments
     if(argc == 3)
     {
         try
@@ -174,6 +178,7 @@ int main(int argc, char *argv[])
         exit(-1);
     }
 
+    // Check that the doctor count is valid
     if(doctorCount < 1 || doctorCount > 3)
     {
         string errorMessage = "Error: Invalid number of doctors. Expected between 1-3 doctors, but found " + to_string(doctorCount) + ".";
@@ -181,6 +186,7 @@ int main(int argc, char *argv[])
         exit(-1);
     }
 
+    // Check that the patient count is valid
     if(patientCount < 1 || patientCount > 30)
     {
         string errorMessage = "Error: Invalid number of patients. Expected between 1-30 patients, but found " + to_string(patientCount) + ".";
@@ -188,10 +194,12 @@ int main(int argc, char *argv[])
         exit(-1);
     }
 
+    // Set up data structures for threads
     patientsAwaitingRegistration = queue<int>();
     patientsAwaitingDoctor = new queue<int>[doctorCount];
     patientsInAppointment = new int[doctorCount];
 
+    // Initialize all semaphores
     sem_init(&awaitReceptionist, 1, 0);
 
     registerPatient = new sem_t[patientCount];
@@ -250,13 +258,16 @@ int main(int argc, char *argv[])
     
     sem_init(&adjustExitedPatients, 1, 1);
 
+    // Print run info
     printf("Run with %i patients, %i nurses, %i doctors\n\n", patientCount, doctorCount, doctorCount);
 
+    // Create thread containers
     patients = new pthread_t[patientCount];
     nurses = new pthread_t[doctorCount];
     doctors = new pthread_t[doctorCount];
     int threadError;
 
+    // Reset stdout buffer to ensure proper output
     setbuf(stdout, NULL);
 
     // Create patient threads
