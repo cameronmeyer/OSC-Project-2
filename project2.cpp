@@ -38,6 +38,10 @@ sem_t* patientDeparture;
 sem_t* doctorEndAppointment;
 sem_t adjustExitedPatients;
 
+sem_t adjustDesiredDoctors;
+sem_t adjustAwaitingRegistration;
+sem_t adjustAwaitingDoctor;
+
 queue<int> patientsAwaitingRegistration;
 queue<int>* patientsAwaitingDoctor;
 
@@ -45,11 +49,15 @@ void *patient(void *patientID)
 {
     int pID = *(int *) &patientID;
     int doctorID = rand() % doctorCount;
+    sem_wait(&adjustDesiredDoctors);
     desiredDoctors[pID] = doctorID;
+    sem_post(&adjustDesiredDoctors);
 
     // Enter room and signal that you'd like to speak with the receptionist
+    sem_wait(&adjustAwaitingRegistration);
     printf("Patient %i enters waiting room, waits for receptionist\n", pID);
     patientsAwaitingRegistration.push(pID);
+    sem_post(&adjustAwaitingRegistration);
     sem_post(&awaitReceptionist);
 
     // Wait for receptionist to complete your registration, then leave the receptionist desk
@@ -58,7 +66,7 @@ void *patient(void *patientID)
     sem_post(&receptionDeskDeparture[pID]);
 
     // Wait to be taken to the doctor's office
-    sem_wait(&waitingRoomDeparture[doctorID]);
+    sem_wait(&waitingRoomDeparture[pID]);
 
     // Signal that we are entering the office
     printf("Patient %i enters doctor %i's office\n", pID, doctorID);
@@ -85,11 +93,13 @@ void *receptionist(void *receptionistID)
 {
     while(true)
     {
-        // When a patient needs registration, retreive them from the queue
+        // When a patient needs registration, retrieve them from the queue
         sem_wait(&awaitReceptionist);
+        sem_wait(&adjustAwaitingRegistration);
         int patientID = patientsAwaitingRegistration.front();
         int doctorID = desiredDoctors[patientID];
         patientsAwaitingRegistration.pop();
+        sem_post(&adjustAwaitingRegistration);
 
         // Signal the patient to leave the receptionist desk, then wait for them to walk away
         printf("Receptionist registers patient %i\n", patientID);
@@ -97,7 +107,9 @@ void *receptionist(void *receptionistID)
         sem_wait(&receptionDeskDeparture[patientID]);
 
         // Signal the appropriate nurse that their patient is ready for their appointment
+        sem_wait(&adjustAwaitingDoctor);
         patientsAwaitingDoctor[doctorID].push(patientID);
+        sem_post(&adjustAwaitingDoctor);
         sem_post(&awaitNurse[doctorID]);
     }
 
@@ -112,12 +124,14 @@ void *nurse(void *nurseID)
     {
         // Wait for a patient to want to see your doctor and retreive them from the queue
         sem_wait(&awaitNurse[nID]);
+        sem_wait(&adjustAwaitingDoctor);
         int patientID = patientsAwaitingDoctor[nID].front();
         patientsAwaitingDoctor[nID].pop();
+        sem_post(&adjustAwaitingDoctor);
 
         // Take patient to doctor's office
         printf("Nurse %i takes patient %i to doctor's office\n", nID, patientID);
-        sem_post(&waitingRoomDeparture[nID]);
+        sem_post(&waitingRoomDeparture[patientID]);
 
         // Wait for patient to recognize they are now inside the doctor's office
         sem_wait(&doctorOfficeArrival[nID]);
@@ -166,9 +180,8 @@ int main(int argc, char *argv[])
         try
         {
             // Assign number of doctors and patients
-            string::size_type sz;
-            doctorCount = stoi(argv[1], &sz);
-            patientCount = stoi(argv[2], &sz);
+            doctorCount = stoi(argv[1]);
+            patientCount = stoi(argv[2]);
         }
         catch(...)
         {
@@ -208,15 +221,16 @@ int main(int argc, char *argv[])
     // Semaphores indexed by patient
     registerPatient = new sem_t[patientCount];
     receptionDeskDeparture = new sem_t[patientCount];
+    waitingRoomDeparture = new sem_t[doctorCount];
     for(int i = 0; i < patientCount; i++)
     {
         sem_init(&registerPatient[i], 1, 0);
         sem_init(&receptionDeskDeparture[i], 1, 0);
+        sem_init(&waitingRoomDeparture[i], 1, 0);
     }
 
     // Semaphores indexed by doctor
     awaitNurse = new sem_t[doctorCount];
-    waitingRoomDeparture = new sem_t[doctorCount];
     doctorOfficeArrival = new sem_t[doctorCount];
     doctorBeginAppointment = new sem_t[doctorCount];
     listenSymptoms = new sem_t[doctorCount];
@@ -226,7 +240,6 @@ int main(int argc, char *argv[])
     for(int i = 0; i < doctorCount; i++)
     {
         sem_init(&awaitNurse[i], 1, 0);
-        sem_init(&waitingRoomDeparture[i], 1, 0);
         sem_init(&doctorOfficeArrival[i], 1, 0);
         sem_init(&doctorBeginAppointment[i], 1, 0);
         sem_init(&listenSymptoms[i], 1, 0);
@@ -236,6 +249,9 @@ int main(int argc, char *argv[])
     }
     
     sem_init(&adjustExitedPatients, 1, 1);
+    sem_init(&adjustDesiredDoctors, 1, 1);
+    sem_init(&adjustAwaitingRegistration, 1, 1);
+    sem_init(&adjustAwaitingDoctor, 1, 1);
 
     // Print run info
     printf("Run with %i patients, %i nurses, %i doctors\n\n", patientCount, doctorCount, doctorCount);
@@ -248,18 +264,6 @@ int main(int argc, char *argv[])
 
     // Reset stdout buffer to ensure proper output
     setbuf(stdout, NULL);
-
-    // Create patient threads
-    for(int i = 0; i < patientCount; i++)
-    {
-        threadError = pthread_create(&patients[i], NULL, patient, (void *) i);
-
-        if(threadError)
-        {
-            printf("Error: Unable to create patient thread with id %i.\n", i);
-            exit(-1);
-        }
-    }
 
     // Create receptionist thread
     threadError = pthread_create(&reception, NULL, receptionist, (void *) 0);
@@ -289,7 +293,19 @@ int main(int argc, char *argv[])
             exit(-1);
         }
     }
-    
+
+    // Create patient threads
+    for(int i = 0; i < patientCount; i++)
+    {
+        threadError = pthread_create(&patients[i], NULL, patient, (void *) i);
+
+        if(threadError)
+        {
+            printf("Error: Unable to create patient thread with id %i.\n", i);
+            exit(-1);
+        }
+    }
+
     pthread_exit(NULL);
     return 0;
 }

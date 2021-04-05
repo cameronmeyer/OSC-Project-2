@@ -17,6 +17,9 @@ readme.txt
 	You are here.
 
 design.pdf
-	
+	A document listing the name, purpose, and initial value of every semaphore.
+	in project2.cpp. It also provides pseudocode for each function in the program.
 
 summary.pdf
+	A document describing the project purpose, how the project was
+	implemented, and Cameron's personal experience in doing the project.
