@@ -16,7 +16,6 @@ using namespace std;
 
 int doctorCount = 0;
 int patientCount = 0;
-int exitedPatients = 0;
 int* desiredDoctors;
 int* patientsInAppointment;
 
@@ -36,11 +35,11 @@ sem_t* listenSymptoms;
 sem_t* listenAdvice;
 sem_t* patientDeparture;
 sem_t* doctorEndAppointment;
-sem_t adjustExitedPatients;
 
 sem_t adjustDesiredDoctors;
 sem_t adjustAwaitingRegistration;
 sem_t adjustAwaitingDoctor;
+sem_t adjustInAppointment;
 
 queue<int> patientsAwaitingRegistration;
 queue<int>* patientsAwaitingDoctor;
@@ -80,10 +79,7 @@ void *patient(void *patientID)
     sem_post(&listenAdvice[doctorID]);
 
     // Patient leaves clinic
-    sem_wait(&adjustExitedPatients);
     printf("Patient %i leaves\n", pID);
-    if(++exitedPatients == patientCount){ exit(0); }
-    sem_post(&adjustExitedPatients);
     sem_post(&patientDeparture[doctorID]);
 
     pthread_exit(NULL);
@@ -137,7 +133,9 @@ void *nurse(void *nurseID)
         sem_wait(&doctorOfficeArrival[nID]);
 
         // Signal doctor that their patient is ready to be seen
+        sem_wait(&adjustInAppointment);
         patientsInAppointment[nID] = patientID;
+        sem_post(&adjustInAppointment);
         sem_post(&doctorBeginAppointment[nID]);
 
         // Wait for appointment to complete
@@ -155,7 +153,9 @@ void *doctor(void *doctorID)
     {
         // Wait to begin appointment until the nurse brings in a patient
         sem_wait(&doctorBeginAppointment[dID]);
+        sem_wait(&adjustInAppointment);
         int patientID = patientsInAppointment[dID];
+        sem_post(&adjustInAppointment);
 
         // Signal to the patient that they may now list off their symptoms
         printf("Doctor %i listens to symptoms from patient %i\n", dID, patientID);
@@ -221,7 +221,7 @@ int main(int argc, char *argv[])
     // Semaphores indexed by patient
     registerPatient = new sem_t[patientCount];
     receptionDeskDeparture = new sem_t[patientCount];
-    waitingRoomDeparture = new sem_t[doctorCount];
+    waitingRoomDeparture = new sem_t[patientCount];
     for(int i = 0; i < patientCount; i++)
     {
         sem_init(&registerPatient[i], 1, 0);
@@ -248,10 +248,10 @@ int main(int argc, char *argv[])
         sem_init(&doctorEndAppointment[i], 1, 0);
     }
     
-    sem_init(&adjustExitedPatients, 1, 1);
     sem_init(&adjustDesiredDoctors, 1, 1);
     sem_init(&adjustAwaitingRegistration, 1, 1);
     sem_init(&adjustAwaitingDoctor, 1, 1);
+    sem_init(&adjustInAppointment, 1, 1);
 
     // Print run info
     printf("Run with %i patients, %i nurses, %i doctors\n\n", patientCount, doctorCount, doctorCount);
@@ -306,6 +306,10 @@ int main(int argc, char *argv[])
         }
     }
 
-    pthread_exit(NULL);
+    for(int i = 0; i < patientCount; i++)
+    {
+        pthread_join(patients[i], NULL);
+    }
+
     return 0;
 }
